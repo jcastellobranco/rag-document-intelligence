@@ -39,3 +39,31 @@ def test_hybrid_search_and_cross_tenant_isolation():
             store._tenant(db, tenant_a)
             db.execute(text("DELETE FROM rag_chunks WHERE id=:id"), {"id":str(chunk)})
     engine.dispose()
+
+@pytest.mark.integration
+def test_embedding_pipeline_against_postgres_with_tenant_guard():
+    from rag_intelligence.pipeline import HybridRagPipeline
+    from rag_intelligence.embeddings import SentenceTransformerEmbedder
+
+    class DeterministicModel:
+        def encode(self, texts, normalize_embeddings=True):
+            return [[1.0] + [0.0] * 383 for _ in texts]
+
+    url = os.environ["RAG_TEST_DATABASE_URL"]
+    engine = create_engine(url)
+    tenant_a, tenant_b = uuid4(), uuid4()
+    store = PgVectorStore(sessionmaker(bind=engine))
+    pipeline = HybridRagPipeline(store, SentenceTransformerEmbedder(model=DeterministicModel()))
+    document = None
+    try:
+        document = pipeline.ingest(tenant_a, "pipeline.md", "PostgreSQL supports row level security")
+        hits = pipeline.search(tenant_a, "row level security")
+        assert any(hit.source == "pipeline.md" for hit in hits)
+        assert pipeline.search(tenant_b, "row level security") == []
+    finally:
+        if document:
+            with sessionmaker(bind=engine).begin() as db:
+                store._tenant(db, tenant_a)
+                db.execute(text("DELETE FROM rag_chunks WHERE document_id=:id"),
+                           {"id": document["document_id"]})
+        engine.dispose()
