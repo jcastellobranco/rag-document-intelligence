@@ -5,7 +5,7 @@ Document ingestion and tenant-scoped retrieval with chunk-level citations, hybri
 ## What works
 
 - Text ingestion and PDF extraction in the original SQLite FTS5 demo API (`src/rag_intelligence/service.py`).
-- Separate PostgreSQL + pgvector API (`src/rag_intelligence/vector_api.py`) with document ingestion and hybrid search via FTS + cosine similarity + Reciprocal Rank Fusion (RRF).
+- Separate PostgreSQL + pgvector API (`src/rag_intelligence/vector_api.py`) with text/PDF ingestion and hybrid search via FTS + cosine similarity + Reciprocal Rank Fusion (RRF).
 - 384-dimensional sentence-transformers embedding adapter (default `all-MiniLM-L6-v2`), lazily loaded; model weights may require a download.
 - PostgreSQL RLS with `app.tenant_id` set per transaction, plus a server-bound tenant ID and API key.
 - Tests for security, API contract, deterministic embedding adapter and pgvector integration, run by GitHub Actions.
