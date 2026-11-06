@@ -1,0 +1,30 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: rag
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local-demo-owner-only
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - rag_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rag"]
+      interval: 5s
+      retries: 10
+  migrate:
+    image: pgvector/pgvector:pg17
+    environment:
+      PGPASSWORD: local-demo-owner-only
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh","-c"]
+    command: >
+      psql -h db -U postgres -d rag -v ON_ERROR_STOP=1 -f /migrations/001_pgvector.sql &&
+      psql -h db -U postgres -d rag -v ON_ERROR_STOP=1 -f /migrations/002_local_role.sql
+volumes:
+  rag_pgdata:
