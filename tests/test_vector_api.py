@@ -39,3 +39,19 @@ def test_vector_api_requires_server_identity():
     import pytest
     with pytest.raises(RuntimeError,match="RAG_TENANT_ID"):
         create_app(api_key="secret",tenant_id="invalid",pipeline=FakePipeline())
+
+def test_pgvector_pdf_rejects_bad_mime_and_blank_pages():
+    import io
+    from pypdf import PdfWriter
+    tenant = str(uuid4())
+    client = TestClient(create_app(api_key="secret",tenant_id=tenant,pipeline=FakePipeline()))
+    headers={"x-api-key":"secret","x-tenant-id":tenant}
+    assert client.post("/v1/documents/pdf",headers=headers,
+        files={"file":("not-pdf.txt",b"hello","text/plain")}).status_code == 415
+    stream=io.BytesIO()
+    writer=PdfWriter()
+    writer.add_blank_page(width=200,height=200)
+    writer.write(stream)
+    response=client.post("/v1/documents/pdf",headers=headers,
+        files={"file":("blank.pdf",stream.getvalue(),"application/pdf")})
+    assert response.status_code == 422
