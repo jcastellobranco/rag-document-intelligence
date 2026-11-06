@@ -1,21 +1,25 @@
-# rag-document-intelligence
+# RAG Document Intelligence
 
-Local document indexing and transparent citation retrieval using deterministic lexical scoring.
+Document ingestion and tenant-scoped retrieval with chunk-level citations, hybrid ranking, and a pluggable embedding provider.
 
-## Status
+## What works
 
-Early-stage educational prototype. Not production-ready. No proprietary course materials, credentials or private datasets are included.
+- Text ingestion and PDF extraction in the original SQLite FTS5 demo API (`src/rag_intelligence/service.py`).
+- Separate PostgreSQL + pgvector API (`src/rag_intelligence/vector_api.py`) with document ingestion and hybrid search via FTS + cosine similarity + Reciprocal Rank Fusion (RRF).
+- 384-dimensional sentence-transformers embedding adapter (default `all-MiniLM-L6-v2`), lazily loaded; model weights may require a download.
+- PostgreSQL RLS with `app.tenant_id` set per transaction, plus a server-bound tenant ID and API key.
+- Tests for security, API contract, deterministic embedding adapter and pgvector integration, run by GitHub Actions.
 
-## Current implementation
+## Run
 
-The Python domain logic is available under `src/`. This first commit establishes a minimal testable baseline; packaging, API integration, automated tests, Docker, CI and operational hardening are being added incrementally.
+See [Vector HTTP API](docs/VECTOR_HTTP_API.md), [Vector architecture](docs/VECTOR_ARCHITECTURE.md), and [Embedding provider](docs/EMBEDDINGS.md). Local database: `docker compose -f docker-compose.vector.yml up -d`.
 
-## Security
+## Integration
 
-Do not deploy the demonstration components as a multi-tenant public service. Authentication, durable persistence, rate limiting and observability require additional work.
+The sibling `ai-inference-platform` calls `POST /v1/search` on the vector API and passes returned evidence to an extractive response or optional LLM provider. Results and citations can be submitted to `llm-evaluation-observability`.
 
-## Roadmap
+## Boundaries
 
-- Complete package metadata and automated tests
-- Add an executable example and continuous integration
-- Implement production-oriented providers, tracing and deployment guidance
+The vector API is intentionally *single-tenant per deployment*. A tenant header is not authentication; callers must bind the authenticated tenant to the server configuration. No GraphRAG or knowledge graph is implemented. A successful CI run validates controlled pgvector tests, not real-model retrieval quality or production deployment. The original SQLite endpoint remains available as a separate demo.
+
+This is a portfolio/reference system, **not production-ready**.
