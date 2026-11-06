@@ -12,6 +12,7 @@ dependencies = ["fastapi>=0.110,<1", "uvicorn>=0.29,<1", "python-multipart>=0.0.
 dev = ["pytest>=8,<10", "httpx>=0.27,<1", "SQLAlchemy>=2.0,<3"]
 pdf = ["pypdf>=5,<7"]
 vector = ["SQLAlchemy>=2.0,<3", "psycopg[binary]>=3.2,<4"]
+embeddings = ["sentence-transformers>=3,<6"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
