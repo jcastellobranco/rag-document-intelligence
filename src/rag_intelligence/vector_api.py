@@ -4,9 +4,10 @@ The service has a *single configured tenant* and authenticates a service API
 key. Multi-tenant callers must route only their authorized tenant here.
 """
 import hmac
+import io
 import os
 from uuid import UUID
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -60,6 +61,29 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
     @app.post("/v1/documents")
     def ingest(body: DocumentIn, authorized_tenant: UUID = Depends(identity)):
         return pipeline.ingest(authorized_tenant, body.source, body.text)
+
+    @app.post("/v1/documents/pdf")
+    async def ingest_pdf(file: UploadFile = File(...), authorized_tenant: UUID = Depends(identity)):
+        if file.content_type != "application/pdf":
+            raise HTTPException(415, "Only application/pdf is supported")
+        raw = await file.read(10 * 1024 * 1024 + 1)
+        if len(raw) > 10 * 1024 * 1024:
+            raise HTTPException(413, "PDF exceeds 10 MiB")
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw), strict=True)
+            if len(reader.pages) > 100:
+                raise HTTPException(413, "PDF exceeds 100 pages")
+            extracted = "\\n".join(page.extract_text() or "" for page in reader.pages)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(422, "Could not parse PDF") from exc
+        if not extracted.strip():
+            raise HTTPException(422, "No extractable text in PDF")
+        if len(extracted) > 200000:
+            raise HTTPException(413, "Extracted text exceeds 200000 characters")
+        return pipeline.ingest(authorized_tenant, (file.filename or "upload.pdf")[:256], extracted)
 
     @app.post("/v1/search")
     def search(body: SearchIn, authorized_tenant: UUID = Depends(identity)):
