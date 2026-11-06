@@ -12,6 +12,12 @@ class FakePipeline:
     def search(self, tenant, question, limit):
         self.calls.append(("search",tenant,question,limit))
         return [RetrievalHit("c1", "guide.md", "Kubernetes schedules pods", .02, "hybrid_rrf")]
+    def list_documents(self, tenant):
+        self.calls.append(("list", tenant))
+        return [{"document_id":str(uuid4()),"source":"guide.md","chunks":1,"created_at":"2026-11-06T00:00:00+00:00"}]
+    def delete_document(self, tenant, document_id):
+        self.calls.append(("delete",tenant,document_id))
+        return True
 
 def test_pgvector_http_contract_and_tenant_guard():
     tenant=str(uuid4())
@@ -55,3 +61,21 @@ def test_pgvector_pdf_rejects_bad_mime_and_blank_pages():
     response=client.post("/v1/documents/pdf",headers=headers,
         files={"file":("blank.pdf",stream.getvalue(),"application/pdf")})
     assert response.status_code == 422
+
+def test_document_catalogue_is_authenticated_and_tenant_bound():
+    tenant = str(uuid4())
+    pipeline = FakePipeline()
+    client = TestClient(create_app(api_key="secret", tenant_id=tenant, pipeline=pipeline))
+    assert client.get("/v1/documents").status_code == 401
+    other = str(uuid4())
+    assert client.get("/v1/documents", headers={"x-api-key":"secret","x-tenant-id":other}).status_code == 403
+    headers={"x-api-key":"secret","x-tenant-id":tenant}
+    response=client.get("/v1/documents", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["items"][0]["source"] == "guide.md"
+    doc=str(uuid4())
+    deleted=client.delete(f"/v1/documents/{doc}",headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert pipeline.calls[0][1] == __import__("uuid").UUID(tenant)
+    assert pipeline.calls[1][1] == __import__("uuid").UUID(tenant)
