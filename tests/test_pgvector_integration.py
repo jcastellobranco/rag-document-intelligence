@@ -67,3 +67,43 @@ def test_embedding_pipeline_against_postgres_with_tenant_guard():
                 db.execute(text("DELETE FROM rag_chunks WHERE document_id=:id"),
                            {"id": document["document_id"]})
         engine.dispose()
+
+@pytest.mark.integration
+def test_vector_http_api_real_pgvector_and_isolation():
+    from fastapi.testclient import TestClient
+    from rag_intelligence.vector_api import create_app
+    from rag_intelligence.pipeline import HybridRagPipeline
+    from rag_intelligence.embeddings import SentenceTransformerEmbedder
+
+    class DeterministicModel:
+        def encode(self, texts, normalize_embeddings=True):
+            return [[1.0]+[0.0]*383 for _ in texts]
+
+    url = os.environ["RAG_TEST_DATABASE_URL"]
+    engine = create_engine(url)
+    tenant_a, tenant_b = uuid4(), uuid4()
+    store = PgVectorStore(sessionmaker(bind=engine))
+    pipeline = HybridRagPipeline(store, SentenceTransformerEmbedder(model=DeterministicModel()))
+    client = TestClient(create_app(api_key="test-key", tenant_id=str(tenant_a), pipeline=pipeline))
+    headers={"x-api-key":"test-key", "x-tenant-id":str(tenant_a)}
+    document = None
+    try:
+        response = client.post("/v1/documents", headers=headers,
+                               json={"source":"real.md","text":"PostgreSQL pgvector supports vector search"})
+        assert response.status_code == 200, response.text
+        document = response.json()["document_id"]
+        retrieved = client.post("/v1/search", headers=headers,
+                                json={"question":"vector search","limit":5})
+        assert retrieved.status_code == 200, retrieved.text
+        citations = retrieved.json()["citations"]
+        assert citations and citations[0]["source"]=="real.md"
+        assert citations[0]["method"]=="hybrid_rrf"
+        assert client.post("/v1/search", headers={"x-api-key":"test-key",
+                "x-tenant-id":str(tenant_b)}, json={"question":"vector search"}).status_code==403
+        assert pipeline.search(tenant_b, "vector search")==[]
+    finally:
+        if document:
+            with sessionmaker(bind=engine).begin() as db:
+                store._tenant(db,tenant_a)
+                db.execute(text("DELETE FROM rag_chunks WHERE document_id=:id"), {"id":document})
+        engine.dispose()
