@@ -27,3 +27,9 @@ class HybridRagPipeline:
             return []
         embeddings = validate_embeddings(self.embedder.encode([question]), 1)
         return self.store.search(tenant_id, question, embeddings[0], limit)
+
+    def list_documents(self, tenant_id: UUID, limit: int = 100) -> list[dict]:
+        return self.store.list_documents(tenant_id, limit)
+
+    def delete_document(self, tenant_id: UUID, document_id: UUID) -> bool:
+        return self.store.delete_document(tenant_id, document_id)
