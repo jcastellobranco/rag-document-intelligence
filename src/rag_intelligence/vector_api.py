@@ -62,6 +62,16 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
     def ingest(body: DocumentIn, authorized_tenant: UUID = Depends(identity)):
         return pipeline.ingest(authorized_tenant, body.source, body.text)
 
+    @app.get("/v1/documents")
+    def list_documents(authorized_tenant: UUID = Depends(identity)):
+        return {"items": pipeline.list_documents(authorized_tenant)}
+
+    @app.delete("/v1/documents/{document_id}")
+    def delete_document(document_id: UUID, authorized_tenant: UUID = Depends(identity)):
+        if not pipeline.delete_document(authorized_tenant, document_id):
+            raise HTTPException(404, "Document not found")
+        return {"deleted": True}
+
     @app.post("/v1/documents/pdf")
     async def ingest_pdf(file: UploadFile = File(...), authorized_tenant: UUID = Depends(identity)):
         if file.content_type != "application/pdf":
