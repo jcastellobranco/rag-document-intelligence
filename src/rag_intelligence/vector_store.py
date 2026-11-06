@@ -85,3 +85,34 @@ class PgVectorStore:
                    "embedding": vector, "limit": limit}).mappings().all()
         return [RetrievalHit(str(r["id"]), r["source"], r["content"],
                              float(r["score"]), "hybrid_rrf") for r in rows]
+
+    def list_documents(self, tenant_id: UUID, limit: int = 100) -> list[dict]:
+        """Persistent tenant-scoped catalogue; no document content is returned."""
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        with self.session_factory.begin() as session:
+            self._tenant(session, tenant_id)
+            rows = session.execute(text("""
+                SELECT document_id, min(source) AS source, count(*) AS chunks,
+                       min(created_at) AS created_at
+                FROM rag_chunks
+                WHERE tenant_id = :tenant
+                GROUP BY document_id
+                ORDER BY created_at DESC, document_id DESC
+                LIMIT :limit
+            """), {"tenant": str(tenant_id), "limit": limit}).mappings().all()
+            return [
+                {"document_id": str(row["document_id"]), "source": row["source"],
+                 "chunks": row["chunks"], "created_at": row["created_at"].isoformat()}
+                for row in rows
+            ]
+
+    def delete_document(self, tenant_id: UUID, document_id: UUID) -> bool:
+        """Delete only chunks visible through tenant RLS; returns False if not found."""
+        with self.session_factory.begin() as session:
+            self._tenant(session, tenant_id)
+            deleted = session.execute(text("""
+                DELETE FROM rag_chunks
+                WHERE tenant_id = :tenant AND document_id = :document
+            """), {"tenant": str(tenant_id), "document": str(document_id)})
+            return deleted.rowcount > 0
