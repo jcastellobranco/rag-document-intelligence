@@ -2,11 +2,12 @@
 import hmac
 import os
 import re
+import io
 import sqlite3
 from contextlib import contextmanager
 from threading import RLock
 from uuid import uuid4
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 
 class DocumentIn(BaseModel):
@@ -27,6 +28,13 @@ class Store:
             db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(body, content='chunks', content_rowid='rowid')")
             db.executescript("""
                 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+                    INSERT INTO chunks_fts(rowid,body) VALUES(new.rowid,new.body);
+                END;
+                CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+                    INSERT INTO chunks_fts(chunks_fts,rowid,body) VALUES('delete',old.rowid,old.body);
+                END;
+                CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
+                    INSERT INTO chunks_fts(chunks_fts,rowid,body) VALUES('delete',old.rowid,old.body);
                     INSERT INTO chunks_fts(rowid,body) VALUES(new.rowid,new.body);
                 END;
             """)
@@ -84,6 +92,30 @@ def create_app(path: str | None = None, api_key: str | None = None) -> FastAPI:
     @app.post("/v1/documents")
     def ingest(doc: DocumentIn, tenant: str = Depends(identity)):
         return store.add(tenant,doc)
+    @app.post("/v1/documents/pdf")
+    async def ingest_pdf(file: UploadFile = File(...), tenant: str = Depends(identity)):
+        if file.content_type != "application/pdf":
+            raise HTTPException(415, "Only application/pdf is supported")
+        max_bytes = 10 * 1024 * 1024
+        raw = await file.read(max_bytes + 1)
+        if len(raw) > max_bytes:
+            raise HTTPException(413, "PDF exceeds 10 MiB")
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw), strict=True)
+            if len(reader.pages) > 100:
+                raise HTTPException(413, "PDF exceeds 100 pages")
+            extracted = "\\n".join(page.extract_text() or "" for page in reader.pages)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(422, "Could not parse PDF")
+        if not extracted.strip():
+            raise HTTPException(422, "No extractable text in PDF")
+        if len(extracted) > 200000:
+            raise HTTPException(413, "Extracted text exceeds 200000 characters")
+        return store.add(tenant, DocumentIn(source=(file.filename or "upload.pdf")[:256], text=extracted))
+
     @app.post("/v1/search")
     def search(query: SearchIn, tenant: str = Depends(identity)):
         return {"citations":store.search(tenant,query.question,query.limit)}
