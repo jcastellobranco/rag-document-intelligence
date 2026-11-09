@@ -11,7 +11,7 @@ jobs:
         env:
           POSTGRES_DB: rag
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+          POSTGRES_PASSWORD: ci-only-postgres-password
         ports:
           - 5432:5432
         options: >-
@@ -29,7 +29,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Apply migrations
         env:
-          PGPASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+          PGPASSWORD: ci-only-postgres-password
         run: |
           psql -h localhost -U postgres -d rag -v ON_ERROR_STOP=1 -f migrations/001_pgvector.sql
           psql -h localhost -U postgres -d rag -v ON_ERROR_STOP=1 -f migrations/002_local_role.sql
@@ -37,7 +37,7 @@ jobs:
         run: python -m pytest -q -m "not integration"
       - name: PostgreSQL integration tests
         env:
-          RAG_TEST_DATABASE_URL: ${{ secrets.RAG_TEST_DATABASE_URL }}
+          RAG_TEST_DATABASE_URL: postgresql+psycopg://rag_runtime:local-rag-development-only@localhost:5432/rag
         run: |
           test -n "$RAG_TEST_DATABASE_URL"
           python -m pytest -q -m integration -rs --junitxml=integration-results.xml
