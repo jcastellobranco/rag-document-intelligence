@@ -107,6 +107,31 @@ class PgVectorStore:
                 for row in rows
             ]
 
+    def get_document(self, tenant_id: UUID, document_id: UUID) -> dict | None:
+        """Read only the selected document under tenant RLS; never fall back to corpus search.
+
+        Ingestion is limited to 200,000 characters, producing at most 471 chunks
+        with the standard chunker. Fail closed if this limit is exceeded.
+        """
+        with self.session_factory.begin() as session:
+            self._tenant(session, tenant_id)
+            rows = session.execute(text("""
+                SELECT id, source, ordinal, content
+                FROM rag_chunks
+                WHERE tenant_id = :tenant AND document_id = :document
+                ORDER BY ordinal
+                LIMIT 513
+            """), {"tenant": str(tenant_id), "document": str(document_id)}).mappings().all()
+        if not rows:
+            return None
+        if len(rows) > 512:
+            raise ValueError("Selected document exceeds the audit chunk limit")
+        return {
+            "document_id": str(document_id), "source": rows[0]["source"],
+            "chunks": [{"chunk_id": str(row["id"]), "ordinal": row["ordinal"],
+                        "text": row["content"]} for row in rows],
+        }
+
     def delete_document(self, tenant_id: UUID, document_id: UUID) -> bool:
         """Delete only chunks visible through tenant RLS; returns False if not found."""
         with self.session_factory.begin() as session:
