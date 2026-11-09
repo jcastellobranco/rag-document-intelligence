@@ -31,5 +31,8 @@ class HybridRagPipeline:
     def list_documents(self, tenant_id: UUID, limit: int = 100) -> list[dict]:
         return self.store.list_documents(tenant_id, limit)
 
+    def get_document(self, tenant_id: UUID, document_id: UUID) -> dict | None:
+        return self.store.get_document(tenant_id, document_id)
+
     def delete_document(self, tenant_id: UUID, document_id: UUID) -> bool:
         return self.store.delete_document(tenant_id, document_id)
