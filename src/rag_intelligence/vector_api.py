@@ -66,6 +66,17 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
     def list_documents(authorized_tenant: UUID = Depends(identity)):
         return {"items": pipeline.list_documents(authorized_tenant)}
 
+    @app.get("/v1/documents/{document_id}/content")
+    def document_content(document_id: UUID, authorized_tenant: UUID = Depends(identity)):
+        """Private authenticated document-scoped read for the audit worker."""
+        try:
+            document = pipeline.get_document(authorized_tenant, document_id)
+        except ValueError:
+            raise HTTPException(413, "Selected document is too large to audit")
+        if document is None:
+            raise HTTPException(404, "Document not found")
+        return document
+
     @app.delete("/v1/documents/{document_id}")
     def delete_document(document_id: UUID, authorized_tenant: UUID = Depends(identity)):
         if not pipeline.delete_document(authorized_tenant, document_id):
