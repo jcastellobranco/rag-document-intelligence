@@ -95,7 +95,15 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
             reader = PdfReader(io.BytesIO(raw), strict=True)
             if len(reader.pages) > 100:
                 raise HTTPException(413, "PDF exceeds 100 pages")
-            extracted = "\\n".join(page.extract_text() or "" for page in reader.pages)
+            parts = []
+            total_chars = 0
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+                total_chars += len(page_text) + (1 if parts else 0)
+                if total_chars > 200000:
+                    raise HTTPException(413, "Extracted text exceeds 200000 characters")
+                parts.append(page_text)
+            extracted = "\n".join(parts)
         except HTTPException:
             raise
         except Exception as exc:
