@@ -5,6 +5,7 @@ key. Multi-tenant callers must route only their authorized tenant here.
 """
 import hmac
 import io
+import logging
 import os
 import time
 from uuid import UUID
@@ -49,6 +50,7 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
         )
     app = FastAPI(title="Vector Document Intelligence", version="0.4.0")
     app.mount("/metrics", metrics_app)
+    logger = logging.getLogger("uvicorn.error")
 
     @app.middleware("http")
     async def record_http_metrics(request: Request, call_next):
@@ -63,7 +65,10 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
             return response
         finally:
             HTTP_REQUESTS.labels(operation=operation, status_class=f"{status // 100}xx").inc()
-            HTTP_DURATION.labels(operation=operation).observe(time.perf_counter() - started)
+            duration = time.perf_counter() - started
+            HTTP_DURATION.labels(operation=operation).observe(duration)
+            logger.info("rag_http operation=%s status_class=%s duration_ms=%.1f",
+                        operation, f"{status // 100}xx", duration * 1000)
 
     def identity(x_api_key: str | None = Header(None),
                  x_tenant_id: str | None = Header(None)) -> UUID:
