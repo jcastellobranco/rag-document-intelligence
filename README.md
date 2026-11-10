@@ -18,6 +18,20 @@ See [Vector HTTP API](docs/VECTOR_HTTP_API.md), [Vector architecture](docs/VECTO
 
 The sibling `ai-inference-platform` calls `POST /v1/search` on the vector API and passes returned evidence to an extractive response or optional LLM provider. Results and citations can be submitted to `llm-evaluation-observability`.
 
+## Local Prometheus metrics
+
+The vector API exposes `GET /metrics/` on its **private** service port for
+the ATLAS Prometheus scraper. It tracks search latency, retrieved-hit counts,
+embedding encode latency, ingested chunks and HTTP request status by a fixed
+operation name. Metrics do not label tenant IDs, questions, document names,
+chunk IDs or raw paths. Prometheus discovers the service at `rag:8000` in
+the sibling `ai-inference-platform` Compose overlay. The
+`llm-evaluation-observability` repository owns the Grafana dashboard.
+
+Use `make up-observability` in the sibling inference checkout to start
+RAG with Prometheus, Grafana, Loki and per-container logs. The metrics endpoint
+is not authenticated; keep the RAG container off public ports.
+
 ## Boundaries
 
 The vector API is intentionally *single-tenant per deployment*. A tenant header is not authentication; callers must bind the authenticated tenant to the server configuration. No GraphRAG or knowledge graph is implemented. A successful CI run validates controlled pgvector tests, not real-model retrieval quality or production deployment. The original SQLite endpoint remains available as a separate demo.
