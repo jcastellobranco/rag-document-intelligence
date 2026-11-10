@@ -6,14 +6,17 @@ key. Multi-tenant callers must route only their authorized tenant here.
 import hmac
 import io
 import os
+import time
 from uuid import UUID
-from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from .embeddings import SentenceTransformerEmbedder
 from .pipeline import HybridRagPipeline
 from .vector_store import PgVectorStore
+from .metrics import (metrics_app, operation_for, HTTP_REQUESTS, HTTP_DURATION,
+                      SEARCH_DURATION, SEARCH_HITS, INGEST_CHUNKS)
 
 class DocumentIn(BaseModel):
     source: str = Field(min_length=1, max_length=256)
@@ -45,6 +48,22 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
             )),
         )
     app = FastAPI(title="Vector Document Intelligence", version="0.4.0")
+    app.mount("/metrics", metrics_app)
+
+    @app.middleware("http")
+    async def record_http_metrics(request: Request, call_next):
+        if request.url.path.startswith("/metrics") or request.url.path == "/health":
+            return await call_next(request)
+        operation = operation_for(request.method, request.url.path)
+        started = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            HTTP_REQUESTS.labels(operation=operation, status_class=f"{status // 100}xx").inc()
+            HTTP_DURATION.labels(operation=operation).observe(time.perf_counter() - started)
 
     def identity(x_api_key: str | None = Header(None),
                  x_tenant_id: str | None = Header(None)) -> UUID:
@@ -60,7 +79,9 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
 
     @app.post("/v1/documents")
     def ingest(body: DocumentIn, authorized_tenant: UUID = Depends(identity)):
-        return pipeline.ingest(authorized_tenant, body.source, body.text)
+        result = pipeline.ingest(authorized_tenant, body.source, body.text)
+        INGEST_CHUNKS.labels(format="text").inc(result["chunks"])
+        return result
 
     @app.get("/v1/documents")
     def list_documents(authorized_tenant: UUID = Depends(identity)):
@@ -112,11 +133,18 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
             raise HTTPException(422, "No extractable text in PDF")
         if len(extracted) > 200000:
             raise HTTPException(413, "Extracted text exceeds 200000 characters")
-        return pipeline.ingest(authorized_tenant, (file.filename or "upload.pdf")[:256], extracted)
+        result = pipeline.ingest(authorized_tenant, (file.filename or "upload.pdf")[:256], extracted)
+        INGEST_CHUNKS.labels(format="pdf").inc(result["chunks"])
+        return result
 
     @app.post("/v1/search")
     def search(body: SearchIn, authorized_tenant: UUID = Depends(identity)):
-        hits = pipeline.search(authorized_tenant, body.question, body.limit)
+        started = time.perf_counter()
+        try:
+            hits = pipeline.search(authorized_tenant, body.question, body.limit)
+        finally:
+            SEARCH_DURATION.observe(time.perf_counter() - started)
+        SEARCH_HITS.observe(len(hits))
         return {"citations": [
             {"chunk_id": h.chunk_id, "source": h.source, "text": h.content,
              "score": h.score, "method": h.method}
