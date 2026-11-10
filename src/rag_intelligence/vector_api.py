@@ -85,7 +85,8 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
     @app.post("/v1/documents")
     def ingest(body: DocumentIn, authorized_tenant: UUID = Depends(identity)):
         result = pipeline.ingest(authorized_tenant, body.source, body.text)
-        INGEST_CHUNKS.labels(format="text").inc(result["chunks"])
+        if isinstance(result, dict) and isinstance(result.get("chunks"), int):
+            INGEST_CHUNKS.labels(format="text").inc(result["chunks"])
         return result
 
     @app.get("/v1/documents")
@@ -139,7 +140,8 @@ def create_app(*, api_key: str | None = None, tenant_id: str | None = None,
         if len(extracted) > 200000:
             raise HTTPException(413, "Extracted text exceeds 200000 characters")
         result = pipeline.ingest(authorized_tenant, (file.filename or "upload.pdf")[:256], extracted)
-        INGEST_CHUNKS.labels(format="pdf").inc(result["chunks"])
+        if isinstance(result, dict) and isinstance(result.get("chunks"), int):
+            INGEST_CHUNKS.labels(format="pdf").inc(result["chunks"])
         return result
 
     @app.post("/v1/search")
