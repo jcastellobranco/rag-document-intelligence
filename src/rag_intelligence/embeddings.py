@@ -1,6 +1,8 @@
 """Embedding provider boundary with an optional local sentence-transformers model."""
 from collections.abc import Sequence
 from math import isfinite, sqrt
+from time import perf_counter
+from .metrics import EMBEDDING_DURATION, EMBEDDING_TEXTS
 from .vector_store import DIMENSIONS
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -38,5 +40,11 @@ class SentenceTransformerEmbedder:
             except ImportError as exc:
                 raise RuntimeError("Install the 'embeddings' extra to use the local model") from exc
             self._model = SentenceTransformer(self.model_name)
-        raw = self._model.encode(list(texts), normalize_embeddings=True)
-        return validate_embeddings(raw, len(texts))
+        started = perf_counter()
+        try:
+            raw = self._model.encode(list(texts), normalize_embeddings=True)
+            validated = validate_embeddings(raw, len(texts))
+            EMBEDDING_TEXTS.inc(len(validated))
+            return validated
+        finally:
+            EMBEDDING_DURATION.observe(perf_counter() - started)
